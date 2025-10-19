@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ETH 转账 DApp</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f7f9fc;
+        }
+        .container {
+            width: 90%;
+            max-width: 500px;
+            padding: 40px;
+            border-radius: 12px;
+            background-color: #ffffff;
+            box-shadow: 0 4px
+ 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 24px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background-color: #007bff;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-top: 10px;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #c0c0c0;
+            cursor: not-allowed;
+        }
+        #connectionStatus, #message {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #555;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>ETH 转账 DApp</h1>
+        <button id="connectButton">连接 MetaMask 钱包</button>
+        <p id="connectionStatus">未连接</p>
+        
+        <div id="transferForm" style="display: none;">
+            <div class="form-group">
+                <label for="recipientAddress">收款地址</label>
+                <input type="text" id="recipientAddress" placeholder="0x..." required>
+            </div>
+            <div class="form-group">
+                <label for="amount">金额 (ETH)</label>
+                <input type="text" id="amount" placeholder="例如: 0.01" required>
+            </div>
+            <button id="sendButton">发送</button>
+        </div>
+        <p id="message"></p>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script>
+        const connectButton = document.getElementById('connectButton');
+        const sendButton = document.getElementById('sendButton');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const message = document.getElementById('message');
+        const transferForm = document.getElementById('transferForm');
+        
+        const contractAddress = "0x05D87D297B7ccB7C10bCEe8b0f326eBf60f21f9E";
+        const contractABI = [ { "inputs": [], "stateMutability": "nonpayable", "type": "constructor" }, { "anonymous": false, "inputs": [ { "indexed": true, "internalType": "address", "name": "from", "type": "address" }, { "indexed": true, "internalType": "address", "name": "to", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" } ], "name": "Sent", "type": "event" }, { "inputs": [], "name": "owner", "outputs": [ { "internalType": "address", "name": "", "type": "address" } ], "stateMutability": "view", "type": "function" }, { "inputs": [ { "internalType": "address payable", "name": "_to", "type": "address" } ], "name": "send", "outputs": [], "stateMutability": "payable", "type": "function" } ];
+
+        let provider;
+        let signer;
+        let contract;
+
+        connectButton.addEventListener('click', async () => {
+            if (typeof window.ethereum === 'undefined') {
+                connectionStatus.textContent = '请先安装 MetaMask！';
+                return;
+            }
+
+            try {
+                // 请求账户权限
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                signer = provider.getSigner();
+                const userAddress = await signer.getAddress();
+                
+                // 确保网络是 Sepolia
+                const network = await provider.getNetwork();
+                if (network.name !== 'sepolia') {
+                    connectionStatus.innerHTML = `请将 MetaMask 网络切换到 <b>Sepolia</b>。<br>当前网络: ${network.name}`;
+                    return;
+                }
+
+                contract = new ethers.Contract(contractAddress, contractABI, signer);
+                
+                connectionStatus.textContent = `已连接: ${userAddress}`;
+                connectButton.style.display = 'none';
+                transferForm.style.display = 'block';
+                message.textContent = '';
+                
+            } catch (error) {
+                console.error("连接钱包失败:", error);
+                connectionStatus.textContent = '连接失败。请重试。';
+            }
+        });
+
+        sendButton.addEventListener('click', async () => {
+            const recipient = document.getElementById('recipientAddress').value;
+            const amount = document.getElementById('amount').value;
+
+            if (!ethers.utils.isAddress(recipient)) {
+                message.textContent = '收款地址格式无效！';
+                message.style.color = 'red';
+                return;
+            }
+            if (isNaN(amount) || amount <= 0) {
+                message.textContent = '金额必须是大于0的数字！';
+                message.style.color = 'red';
+                return;
+            }
+
+            sendButton.disabled = true;
+            message.textContent = '正在准备交易，请在 MetaMask 中确认...';
+            message.style.color = 'blue';
+
+            try {
+                const amountInWei = ethers.utils.parseEther(amount);
+                
+                // 调用合约的 send 方法
+                const tx = await contract.send(recipient, { value: amountInWei });
+                
+                message.textContent = `交易已发送！正在等待确认... Hash: ${tx.hash}`;
+                
+                await tx.wait(); // 等待交易被打包
+                
+                message.textContent = '交易成功！转账已完成。';
+                message.style.color = 'green';
+                
+            } catch (error) {
+                console.error("交易失败:", error);
+                message.textContent = `交易失败: ${error.reason || error.message}`;
+                message.style.color = 'red';
+            } finally {
+                sendButton.disabled = false;
+            }
+        });
+    </script>
+
+</body>
+</html>
